@@ -1,0 +1,83 @@
+{
+  "_metadata": {
+    "version": "1.0.0",
+    "description": "Hot-reloadable configuration for AI personality cloning bot - only contains settings that correspond to actual hardcoded values in the implementation",
+    "last_updated": "2025-06-11T20:20:00Z",
+    "schema_version": "1.0"
+  },
+
+  "ai_behavior": {
+    "decision_making": {
+      "cache_ttl_seconds": {
+        "security": 3600,
+        "classification": 1800,
+        "information_value": 600
+      }
+    },
+    "typing_simulation": {
+      "enabled": true,
+      "base_speed_range": [3.5, 5.0],
+      "thinking_time_range": [0.5, 2.0],
+      "reading_pause_range": [0.3, 1.0],
+      "min_delay_seconds": 0.5,
+      "max_delay_seconds": 15.0,
+      "thinking_threshold_chars": 100,
+      "reading_threshold_chars": 50
+    },
+    "context_engine": {
+      "max_context_messages": 10,
+      "prioritize_recent_messages": true,
+      "context_position_priority": "high",
+      "include_message_timing": true,
+      "include_sender_info": true,
+      "context_preview_length": 150,
+      "show_full_recent_messages": 3
+    }
+  },
+
+  "platform_settings": {
+    "flagged_messages": {
+      "max_flagged_messages_per_channel": 5
+    }
+  },
+
+  "participation_control": {
+    "enabled": false,
+    "threshold_percentage": 30,
+    "time_window_minutes": 10,
+    "group_chat_threshold": 30,
+    "direct_message_threshold": 50,
+    "description": "Controls AI participation rate limiting to prevent over-chatting"
+  },
+
+  "debug": {
+    "logging": {
+      "detailed_ai_decisions": false,
+      "log_api_calls": false,
+      "log_context_formatting": true
+    },
+    "development": {
+      "debug_mode": false,
+      "verbose_errors": false
+    }
+  },
+
+  "notifications": {
+    "startup": {
+      "enabled": true,
+      "show_config_status": true
+    },
+    "runtime": {
+      "config_reload_notifications": true,
+      "error_notifications": true
+    }
+  },
+
+  "platform_specific": {
+    "discord": {
+      "always_answer_dms": true,
+      "always_reply_to_mentions": true,
+      "description": "Discord-specific behavior settings for direct messages and mentions"
+    }
+  }
+}

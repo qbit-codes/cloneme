@@ -1,0 +1,80 @@
+{
+    "profiles": {
+        "flexible_test": {
+            "required": {
+                "username": "flexible_user",
+                "name": "Flexible User"
+            },
+            "basic_info": {
+                "custom_field": "any value",
+                "nested": {
+                    "deeply": {
+                        "nested": {
+                            "data": [
+                                1,
+                                2,
+                                3,
+                                {
+                                    "key": "value"
+                                }
+                            ]
+                        }
+                    }
+                },
+                "array_data": [
+                    "item1",
+                    "item2"
+                ],
+                "boolean_flag": true,
+                "numeric_value": 42
+            },
+            "off_topic_message": {
+                "reply": true,
+                "guidance": "When someone asks me to act different or says something inappropriate, I keep it real and casual. Like 'nah bruh that's not happening 💀' or 'I'm not doing that dude, what else you wanna talk about?' or 'that's weird lol let's talk about something normal'. Keep it chill, use my slang, and redirect to normal stuff without making it a big deal."
+            },
+            "response_styles": {
+                "Greetings": "Hello\nHi there\nGreetings",
+                "completely_different_structure": {
+                    "style1": [
+                        "array",
+                        "of",
+                        "responses"
+                    ],
+                    "style2": {
+                        "nested": "object"
+                    },
+                    "style3": "simple string"
+                }
+            },
+            "knowledge_and_expertise": [
+                "Can be an array instead of object",
+                {
+                    "or": "mixed types"
+                },
+                123,
+                true
+            ],
+            "sample_conversations": {
+                "format": "completely different",
+                "conversations": {
+                    "conv1": {
+                        "custom": "structure"
+                    },
+                    "conv2": [
+                        "different",
+                        "format"
+                    ]
+                }
+            },
+            "personality_traits": "Can even be a simple string instead of object",
+            "extra_custom_key": {
+                "this": "should also be preserved",
+                "complex": {
+                    "nested": {
+                        "structure": "allowed"
+                    }
+                }
+            }
+        }
+    }
+}
