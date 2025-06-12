@@ -1052,19 +1052,6 @@ CloneMe uses Discord's self-bot functionality, which operates within Discord's t
 </details>
 
 <details>
-<summary><strong>💰 How much does it cost to run CloneMe?</strong></summary>
-
-Costs depend on your AI provider and usage:
-- **OpenAI GPT-4**: ~$0.02-0.05 per 1000 messages
-- **Anthropic Claude**: ~$0.01-0.03 per 1000 messages
-- **Google Gemini**: ~$0.001-0.01 per 1000 messages
-- **Groq**: ~$0.0002-0.001 per 1000 messages
-- **Ollama**: Free (local processing)
-
-**Tip:** Use participation controls to manage costs effectively!
-</details>
-
-<details>
 <summary><strong>🧠 How intelligent is the memory system?</strong></summary>
 
 CloneMe's memory system is designed to be human-like:
