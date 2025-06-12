@@ -753,12 +753,6 @@ class NewPlatform(BasePlatform):
 <td>95.2%</td>
 <td>📈 4.6% better</td>
 </tr>
-<tr>
-<td><strong>💰 API Cost</strong></td>
-<td>$0.02/1K msgs</td>
-<td>$0.08/1K msgs</td>
-<td>💸 75% savings</td>
-</tr>
 </table>
 
 ### 🎯 Optimization Features
