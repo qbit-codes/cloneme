@@ -68,8 +68,10 @@ class Colors:
         try:
             import ctypes
             kernel32 = ctypes.windll.kernel32
-            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
-        except:
+            version = platform.version().split('.')
+            if len(version) >= 3 and int(version[0]) >= 10:
+                kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+        except (Exception, AttributeError, ValueError):
             pass
 
     RED = '\033[91m'
@@ -167,7 +169,11 @@ def check_python_version() -> bool:
         elif version >= (3, 11):
             logger.info(f"Compatible Python version: {current_version}")
             print_colored(f"✅ COMPATIBLE: Python {current_version}", Colors.GREEN)
-            print_colored(f"   💡 Tip: Python {RECOMMENDED_PYTHON} is the tested version", Colors.YELLOW, "warning")
+            if version >= (3, 12):
+                print_colored(f"   ⚠️  Warning: Python {current_version} may have package compatibility issues", Colors.YELLOW, "warning")
+                print_colored(f"   💡 Strongly recommend Python {RECOMMENDED_PYTHON} for best compatibility", Colors.YELLOW, "warning")
+            else:
+                print_colored(f"   💡 Tip: Python {RECOMMENDED_PYTHON} is the tested version", Colors.YELLOW, "warning")
         else:
             logger.warning(f"Python version may have compatibility issues: {current_version}")
             print_colored(f"⚠️  WARNING: Python {current_version} may have compatibility issues", Colors.YELLOW, "warning")
@@ -273,7 +279,7 @@ def check_pip() -> bool:
         print_colored("✅ pip upgraded successfully", Colors.GREEN)
         return True
     except subprocess.CalledProcessError as e:
-        error_msg = e.stderr.decode() if e.stderr else str(e)
+        error_msg = e.stderr if e.stderr else str(e)
         logger.warning(f"Pip upgrade failed but pip is available: {error_msg}")
         print_colored("⚠️  Warning: pip upgrade failed, but pip is available", Colors.YELLOW, "warning")
         print_colored(f"   Error: {error_msg[:200]}...", Colors.YELLOW, "warning")
@@ -500,7 +506,7 @@ def install_discord_py_self() -> bool:
         print_colored("✅ discord.py-self installed successfully", Colors.GREEN)
         return True
     except subprocess.CalledProcessError as e:
-        error_msg = e.stderr.decode() if e.stderr else str(e)
+        error_msg = e.stderr if e.stderr else str(e)
         logger.error(f"Failed to install discord.py-self: {error_msg}")
         print_colored("❌ Failed to install discord.py-self", Colors.RED, "error")
         print_colored(f"   Error: {error_msg[:200]}...", Colors.RED, "error")
@@ -521,6 +527,19 @@ def install_requirements() -> bool:
 
     print_colored("📦 Installing Python packages with exact tested versions...", Colors.BLUE + Colors.BOLD)
     print_colored("   This ensures maximum compatibility and stability", Colors.WHITE)
+    print()
+
+    system_name = platform.system()
+    if system_name == "Linux":
+        print_colored("ℹ️  Note: Some packages may require build tools if wheels are unavailable:", Colors.CYAN)
+        print_colored("   Ubuntu/Debian: sudo apt install build-essential libssl-dev libffi-dev", Colors.WHITE)
+        print_colored("   CentOS/RHEL: sudo yum groupinstall 'Development Tools'", Colors.WHITE)
+    elif system_name == "Darwin":
+        print_colored("ℹ️  Note: Some packages may require Xcode command line tools:", Colors.CYAN)
+        print_colored("   Run: xcode-select --install", Colors.WHITE)
+    elif system_name == "Windows":
+        print_colored("ℹ️  Note: Some packages may require Visual C++ Build Tools:", Colors.CYAN)
+        print_colored("   Download from: https://visualstudio.microsoft.com/visual-cpp-build-tools/", Colors.WHITE)
     print()
 
     pip_cmd = get_pip_command()
@@ -552,7 +571,7 @@ def install_requirements() -> bool:
             cmd = pip_cmd + ["install"] + batch
             logger.debug(f"Running batch install command: {' '.join(cmd)}")
             batch_start = datetime.now()
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600)
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=1200)
             batch_duration = datetime.now() - batch_start
 
             logger.info(f"Batch {batch_num} completed successfully in {batch_duration.total_seconds():.1f}s")
@@ -560,11 +579,27 @@ def install_requirements() -> bool:
             print_colored(f"   ✅ Batch {batch_num} completed successfully ({batch_duration.total_seconds():.1f}s)", Colors.GREEN)
             successful_batches += 1
         except subprocess.CalledProcessError as e:
-            error_msg = e.stderr.decode() if e.stderr else str(e)
+            error_msg = e.stderr if e.stderr else str(e)
             logger.error(f"Batch {batch_num} failed: {error_msg}")
             print_colored(f"   ❌ Batch {batch_num} failed", Colors.RED, "error")
-            failed_packages.extend(batch)
             print_colored(f"   Error: {error_msg[:200]}...", Colors.RED, "error")
+
+            logger.info(f"Attempting individual installation for batch {batch_num}")
+            print_colored(f"   🔄 Trying individual package installation...", Colors.YELLOW)
+            for pkg in batch:
+                try:
+                    individual_cmd = pip_cmd + ["install", pkg]
+                    subprocess.run(individual_cmd, check=True, capture_output=True, text=True, timeout=300)
+                    logger.debug(f"Individual install succeeded: {pkg}")
+                except subprocess.CalledProcessError:
+                    logger.error(f"Individual install failed: {pkg}")
+                    failed_packages.append(pkg)
+                except subprocess.TimeoutExpired:
+                    logger.error(f"Individual install timed out: {pkg}")
+                    failed_packages.append(pkg)
+                except Exception as e:
+                    logger.error(f"Individual install error for {pkg}: {e}")
+                    failed_packages.append(pkg)
         except subprocess.TimeoutExpired:
             logger.error(f"Batch {batch_num} timed out")
             print_colored(f"   ❌ Batch {batch_num} timed out", Colors.RED, "error")
@@ -816,7 +851,7 @@ def verify_installation() -> bool:
             print_colored(f"   - {file}", Colors.RED)
         return False
 
-    critical_modules = ["langchain", "anthropic", "openai", "python_dotenv"]
+    critical_modules = ["langchain", "anthropic", "openai", "dotenv"]
     failed_imports = []
 
     for module_name in critical_modules:
