@@ -238,3 +238,4 @@ $RECYCLE.BIN/
 .venv/
 .venv/*
 tree.py
+/.index
