@@ -510,7 +510,7 @@ class MatrixPlatform(BasePlatform):
         reply_to_message_id = self._get_reply_to_message_id(platform_msg)
 
         timestamp = datetime.datetime.fromtimestamp(
-            int(platform_msg.server_timestamp / 1000)
+            int(platform_msg.server_timestamp / 1000), tz=datetime.timezone.utc
         )  # sec since 1970
         event_datetime = timestamp.strftime("%Y-%m-%d %H:%M:%S")
 
