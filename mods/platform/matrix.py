@@ -110,7 +110,7 @@ class MatrixPlatform(BasePlatform):
         """Handle incoming Matrix messages."""
         try:
             self.logger.debug(
-                f"Received messag in {room.room_id}: {event.body[:50]}..."
+                f"Received message in {room.room_id}: {event.body[:50]}..."
             )
 
             # Skip our own messages
@@ -141,6 +141,35 @@ class MatrixPlatform(BasePlatform):
     async def _handle_own_message(self, event: RoomMessageText, room: MatrixRoom):
         """Handle messages sent by the bot itself."""
         self.logger.debug(f"Bot sent message in {room.room_id}: {event.body[:50]}...")
+        try:
+            chat_id = str(room.room_id)
+            chat = self.convert_platform_chat(room)
+            matrix_user = await self._get_matrix_user(event.sender, room)
+            sender = self.convert_platform_user(matrix_user)
+
+            chat.add_participant(sender)
+            msg_obj = self.convert_platform_message(event, chat, sender)
+            chat.add_message(msg_obj)
+
+            existing_active_chat = next(
+                (
+                    chat_obj
+                    for chat_obj in self.active_chats
+                    if chat_obj.active_chat_id == chat_id
+                ),
+                None,
+            )
+
+            if existing_active_chat:
+                existing_active_chat.update_last_message_time()
+                existing_active_chat.chat_object = chat
+            else:
+                self.active_chats.append(ActiveChat(chat_id, chat))
+
+            self.cleanup_inactive_chats()
+
+        except Exception as e:
+            self.logger.error(f"Error handling own message: {e}")
 
     async def _handle_user_message(self, event: RoomMessageText, room: MatrixRoom):
         """Handle messages from other users."""
@@ -156,15 +185,20 @@ class MatrixPlatform(BasePlatform):
             msg_obj = self.convert_platform_message(event, chat, sender)
             chat.add_message(msg_obj)
 
-            # Store objects for future reference
-            self.persons[sender.person_id] = sender
-            self.chats[chat.chat_id] = chat
+            existing_active_chat = next(
+                (
+                    chat_obj
+                    for chat_obj in self.active_chats
+                    if chat_obj.active_chat_id == chat_id
+                ),
+                None,
+            )
 
-            # Update active chats
-            self._update_active_chat(chat_id, chat)
+            if existing_active_chat:
+                existing_active_chat.update_last_message_time()
+                existing_active_chat.chat_object = chat
 
             context_messages = await self.collect_context(event)
-
             # DM detection
             is_dm = self._is_direct_message(room)
             # Process message through platform manager
