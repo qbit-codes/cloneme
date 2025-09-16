@@ -6,6 +6,8 @@ It follows the same pattern as the Discord platform implementation.
 """
 
 import asyncio
+from email import message
+from platform import platform
 from typing import Any, List, Optional, TYPE_CHECKING
 
 import re
@@ -13,21 +15,15 @@ import datetime
 
 from nio import (
     AsyncClient,
-    DownloadError,
+    Event,
     MatrixRoom,
     MatrixUser,
+    MessageDirection,
     ProfileGetAvatarError,
     ProfileGetAvatarResponse,
-    RoomEncryptedMedia,
-    RoomMessageAudio,
-    RoomMessageEmote,
-    RoomMessageFile,
-    RoomMessageFormatted,
-    RoomMessageImage,
-    RoomMessageMedia,
-    RoomMessageNotice,
     RoomMessageText,
-    RoomMessageUnknown,
+    RoomMessagesError,
+    RoomMessagesResponse,
     SyncResponse,
     LoginResponse,
     JoinError,
@@ -113,13 +109,32 @@ class MatrixPlatform(BasePlatform):
     async def _on_message(self, room: MatrixRoom, event: RoomMessageText):
         """Handle incoming Matrix messages."""
         try:
+            self.logger.debug(
+                f"Received messag in {room.room_id}: {event.body[:50]}..."
+            )
+
             # Skip our own messages
             if event.sender == self.matrix_client.user_id:
                 return await self._handle_own_message(event, room)
 
-            # Process user messages
-            return await self._handle_user_message(event, room)
+            # Check if we should always respond based on Matrix-specific settings
+            should_always_respond = self._should_always_respond(event, room)
+            is_active = self._is_active_chat_message(room)
 
+            self.logger.debug(
+                f"Should always respond: {should_always_respond}, Is active: {is_active}"
+            )
+
+            # Process if it's an active chat OR if Matrix settings require always responding
+            if is_active or should_always_respond:
+                return await self._handle_user_message(event, room)
+            else:
+                self.logger.debug(
+                    "Not responding - not active and no always-respond conditions met"
+                )
+
+            self.cleanup_inactive_chats()
+            return None
         except Exception as e:
             self.logger.error(f"Error in Matrix message handler: {e}")
 
@@ -131,22 +146,31 @@ class MatrixPlatform(BasePlatform):
         """Handle messages from other users."""
         try:
             # Convert Matrix objects to CloneMe objects
+            chat_id = str(room.room_id)
             matrix_user = await self._get_matrix_user(event.sender, room)
             sender = self.convert_platform_user(matrix_user)
             chat = self.convert_platform_chat(room)
-            msg_obj = self.convert_platform_message(event, room, chat, sender)
+
+            # Build message context
+            chat.add_participant(sender)
+            msg_obj = self.convert_platform_message(event, chat, sender)
             chat.add_message(msg_obj)
 
             # Store objects for future reference
-            # self.persons[person.person_id] = person
-            # self.chats[chat.chat_id] = chat
+            self.persons[sender.person_id] = sender
+            self.chats[chat.chat_id] = chat
 
             # Update active chats
-            self._update_active_chat(chat.chat_id, chat)
+            self._update_active_chat(chat_id, chat)
 
             context_messages = await self.collect_context(event)
+
+            # DM detection
+            is_dm = self._is_direct_message(room)
             # Process message through platform manager
-            await self.platform_manager.process_message(self, msg_obj, context_messages)
+            await self.platform_manager.process_message(
+                self, msg_obj, context_messages, is_dm_override=is_dm
+            )
 
         except Exception as e:
             self.logger.error(f"Error handling Matrix user message: {e}")
@@ -210,6 +234,95 @@ class MatrixPlatform(BasePlatform):
             avatar_url=avatar_url,  # Could be fetched if needed
         )
 
+    def _is_active_chat_message(self, room: MatrixRoom) -> bool:
+        """Check if the message is part of an active chat."""
+        chat_id = str(room.room_id)
+        existing_chat = next(
+            (chat for chat in self.active_chats if chat.active_chat_id == chat_id), None
+        )
+        return existing_chat is not None
+
+    def _is_direct_message(self, room: MatrixRoom) -> bool:
+        """Check if a Matrix room is a direct message."""
+        return len(room.users) == 2 and (
+            not room.display_name or room.display_name == "Empty Room"
+        )
+
+    def _is_bot_mentioned(self, event: RoomMessageText) -> bool:
+        """Check if the bot is mentioned in a Matrix message."""
+        if not self.matrix_client.user_id:
+            return False
+
+        # Check for actual Matrix User ID mention
+        user_id_pattern = rf"@{re.escape(self.matrix_client.user_id)}"
+        if re.search(user_id_pattern, event.body):
+            return True
+
+        if self.profile and self.profile.username:
+            username_pattern = rf"{re.escape(self.profile.username)}:"
+            if re.search(username_pattern, event.body):
+                return True
+
+        return False
+
+    def _should_always_respond(self, event: RoomMessageText, room: MatrixRoom) -> bool:
+        """
+        Check if the bot should always respond based on Matrix-specific settings.
+
+        Returns:
+            bool: True if the bot should always respond, False otherwise
+        """
+        if not self.settings_manager:
+            return False
+
+        is_dm = self._is_direct_message(room)
+        self.logger.debug(
+            f"Is DM: {is_dm}, Room users: {len(room.users)}, Room name: '{room.display_name}'"
+        )
+
+        if is_dm:
+            should_respond = self.settings_manager.get(
+                "platform_specific.matrix.always_answer_dms", True
+            )
+            self.logger.debug(f"DM detected - should respond: {should_respond}")
+            return should_respond
+
+        is_mentioned = self._is_bot_mentioned(event)
+        self.logger.debug(
+            f"Is bot mentioned: {is_mentioned}, Bot user_id: {self.matrix_client.user_id}"
+        )
+
+        if is_mentioned:
+            should_respond = self.settings_manager.get(
+                "platform_specific.matrix.always_reply_to_mentions", True
+            )
+            self.logger.debug(f"Bot mentioned - should respond: {should_respond}")
+            return should_respond
+
+        self.logger.debug("No always-respond conditions met")
+        return False
+
+    def _extract_mentions(self, event: RoomMessageText) -> List[str]:
+        """Extract mentioned user IDs from a Matrix message."""
+        mentions = []
+        # Matrix mentions format: @username:server.com
+        mention_pattern = r"@([^:]+:[^:\s]+)"
+        matches = re.findall(mention_pattern, event.body)
+        for match in matches:
+            mentions.append(f"@{match}")
+        return mentions
+
+    def _get_reply_to_message_id(self, event: RoomMessageText) -> Optional[str]:
+        """Get the message ID that this Matrix message is replying to."""
+        # Matrix replies are in the event content
+        if hasattr(event, "source") and event.source.get("content", {}).get(
+            "m.relates_to"
+        ):
+            relation = event.source["content"]["m.relates_to"]
+            if relation.get("rel_type") == "m.reply":
+                return relation.get("event_id")
+        return None
+
     def _update_active_chat(self, chat_id: str, chat: Chat):
         """Update or add a chat to the active chats list."""
         # Find existing active chat
@@ -271,83 +384,149 @@ class MatrixPlatform(BasePlatform):
     ) -> List[Message]:
         """Collect recent messages from the Matrix room as context."""
         try:
-            # Get the room from the message
-            room = self.matrix_client.rooms.get(message_ref.room_id)
-            if not room:
+            context: List[Message] = []
+            room_id = None
+            matrix_room = None
+
+            # Handle different types of message_ref
+            if isinstance(message_ref, str):
+                # message_ref is a room_id string
+                room_id = message_ref
+                matrix_room = self.matrix_client.rooms.get(room_id)
+            elif hasattr(message_ref, "room_id"):
+                room_id = str(message_ref.room_id)
+                if hasattr(message_ref, "users"):
+                    matrix_room = message_ref
+                else:
+                    matrix_room = self.matrix_client.rooms.get(room_id)
+            elif hasattr(message_ref, "chat") and hasattr(message_ref.chat, "chat_id"):
+                # message_ref is a CloneMe Message object
+                room_id = message_ref.chat.chat_id
+                matrix_room = self.matrix_client.rooms.get(room_id)
+            else:
+                self.logger.error(f"Unknown message_ref type: {type(message_ref)}")
                 return []
 
-            context_messages = []
+            if not matrix_room or not room_id:
+                self.logger.error(f"Could not find Matrix room {room_id}")
+                return []
 
-            # Get recent messages from room timeline
-            # Note: This is a simplified implementation
-            # In production, you might want to use room.messages() or similar
+            chat = self.convert_platform_chat(matrix_room)
 
-            return context_messages
+            history_resp = await self.matrix_client.room_messages(
+                room_id=room_id,
+                limit=max_context,
+                direction=MessageDirection.back,  # backward from most recent
+            )
 
+            if isinstance(history_resp, RoomMessagesResponse):
+                if hasattr(history_resp, "chunk") and history_resp.chunk:
+                    # Get message IDs for flagged message cleanup
+                    context_message_ids = [
+                        str(event.event_id) for event in history_resp.chunk
+                    ]
+                    self.remove_flagged_messages_not_in_context(
+                        room_id, context_message_ids
+                    )
+
+                    flagged_count = 0
+                    for event in reversed(history_resp.chunk):
+                        try:
+                            # Only process message events we can handle
+                            if (
+                                hasattr(event, "sender")
+                                and hasattr(event, "body")
+                                and isinstance(event, Event)
+                            ):
+                                message_id = str(event.event_id)
+
+                                # Check if message is flagged
+                                if self.is_message_flagged(message_id):
+                                    flagged_count += 1
+                                    self.logger.debug(
+                                        f"Filtering out flagged message {message_id} from context"
+                                    )
+                                    continue
+
+                                # Get sender information
+                                matrix_user = await self._get_matrix_user(
+                                    event.sender, matrix_room
+                                )
+                                sender = self.convert_platform_user(matrix_user)
+                                chat.add_participant(sender)
+                                # Convert to Message object
+                                msg_obj = self.convert_platform_message(
+                                    event, chat, sender
+                                )
+                                context.append(msg_obj)
+
+                        except Exception as e:
+                            self.logger.warning(
+                                f"Error processing context message: {e}"
+                            )
+                            continue
+
+                    if flagged_count > 0:
+                        self.logger.debug(
+                            f"Context collected: {len(context)} messages ({flagged_count} flagged messages filtered out)"
+                        )
+            elif isinstance(history_resp, RoomMessagesError):
+                self.logger.error(
+                    f"Error getting room messages for: {history_resp.room_id}"
+                )
+
+            return context
         except Exception as e:
             self.logger.error(f"Error collecting Matrix context: {e}")
             return []
 
     def convert_platform_message(
-        self, event, room: MatrixRoom, chat: Chat, sender: Person
+        self, platform_msg, chat: Chat, sender: Person
     ) -> Message:
         """Convert a Matrix message to a generic Message object."""
-        """
-        if isinstance(event, RoomMessageMedia): # for all media events
-            mxc = event.url
-            url = await self.matrix_client.mxc_to_http(mxc) # media url
-            msg_url = " [" + url + "]"
+        # Extract mentions and reply info
+        mentions = self._extract_mentions(platform_msg)
+        reply_to_message_id = self._get_reply_to_message_id(platform_msg)
 
-            resp = await download_mxc(self.matrix_client, mxc)
-            if isinstance(resp, DownloadError):
-
-        if isinstance(event, RoomEncryptedMedia): # for all e2e media
-            pass
-        if isinstance(event, RoomMessageAudio):
-            pass
-        elif isinstance(event, RoomMessageEmote):
-            pass
-        elif isinstance(event, RoomMessageFile):
-            pass
-        elif isinstance(event, RoomMessageFormatted):
-            pass
-        elif isinstance(event, RoomMessageImage):
-            pass
-        elif isinstance(event, RoomMessageNotice):
-            pass
-        elif isinstance(event, RoomMessageText):
-            pass
-        elif isinstance(event, RoomMessageUnknown):
-            pass
-        """
         timestamp = datetime.datetime.fromtimestamp(
-            int(event.server_timestamp / 1000)
+            int(platform_msg.server_timestamp / 1000)
         )  # sec since 1970
         event_datetime = timestamp.strftime("%Y-%m-%d %H:%M:%S")
 
-        sender_nick = room.user_name(event.sender)
-        if not sender_nick:  # convert @foo:mat.io into foo
-            sender_nick = event.sender.split(":")[0][1:]
-        room_nick = room.display_name
-        if room_nick in (None, "", "Empty Room"):
-            room_nick = "Undetermined"
-        msg = event.body
+        room = self.matrix_client.rooms.get(chat.chat_id)
+        sender_nick = None
+
+        if isinstance(room, MatrixRoom):
+            sender_nick = room.user_name(platform_msg.sender)
+            if not sender_nick:  # convert @foo:mat.io into foo
+                sender_nick = platform_msg.sender.split(":")[0][1:]
+            room_nick = room.display_name
+            if room_nick in (None, "", "Empty Room"):
+                room_nick = "Undetermined"
+
+        msg = platform_msg.body
         fixed_msg = re.sub("\n", "\n    ", msg)
         text = fixed_msg
         metadata = {
-            "matrix_source": event.source,
+            "matrix_source": platform_msg.source,
             "matrix_room": room,
-            "matrix_room_display_name": room.display_name,
+            "matrix_room_display_name": room.display_name
+            if isinstance(room, MatrixRoom)
+            else "",
             "matrix_sender_name": sender_nick,
             "matrix_datetime": event_datetime,
+            "matrix_event_id": str(platform_msg.event_id),
+            "matrix_room_id": str(room.room_id) if room else chat.chat_id,
         }
 
         return Message(
-            message_id=str(event.event_id),
+            message_id=str(platform_msg.event_id),
             content=text,
             sender=sender,
             created_at=timestamp,
             chat=chat,
+            reply_to_message_id=reply_to_message_id,
+            mentions=mentions,
             metadata=metadata,
         )
 
