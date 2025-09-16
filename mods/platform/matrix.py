@@ -198,7 +198,7 @@ class MatrixPlatform(BasePlatform):
                 existing_active_chat.update_last_message_time()
                 existing_active_chat.chat_object = chat
 
-            context_messages = await self.collect_context(event)
+            context_messages = await self.collect_context(room)
             # DM detection
             is_dm = self._is_direct_message(room)
             # Process message through platform manager
@@ -278,9 +278,7 @@ class MatrixPlatform(BasePlatform):
 
     def _is_direct_message(self, room: MatrixRoom) -> bool:
         """Check if a Matrix room is a direct message."""
-        return len(room.users) == 2 and (
-            not room.display_name or room.display_name == "Empty Room"
-        )
+        return len(room.users) == 2
 
     def _is_bot_mentioned(self, event: RoomMessageText) -> bool:
         """Check if the bot is mentioned in a Matrix message."""
@@ -422,24 +420,13 @@ class MatrixPlatform(BasePlatform):
             room_id = None
             matrix_room = None
 
-            # Handle different types of message_ref
-            if isinstance(message_ref, str):
-                # message_ref is a room_id string
-                room_id = message_ref
-                matrix_room = self.matrix_client.rooms.get(room_id)
-            elif hasattr(message_ref, "room_id"):
-                room_id = str(message_ref.room_id)
-                if hasattr(message_ref, "users"):
-                    matrix_room = message_ref
-                else:
-                    matrix_room = self.matrix_client.rooms.get(room_id)
-            elif hasattr(message_ref, "chat") and hasattr(message_ref.chat, "chat_id"):
-                # message_ref is a CloneMe Message object
-                room_id = message_ref.chat.chat_id
-                matrix_room = self.matrix_client.rooms.get(room_id)
+            if isinstance(message_ref, MatrixRoom):
+                room_id = message_ref.room_id
+                matrix_room = message_ref
             else:
-                self.logger.error(f"Unknown message_ref type: {type(message_ref)}")
-                return []
+                self.logger.error(
+                    f"Unexpected type for message_ref: {type(message_ref)}"
+                )
 
             if not matrix_room or not room_id:
                 self.logger.error(f"Could not find Matrix room {room_id}")
