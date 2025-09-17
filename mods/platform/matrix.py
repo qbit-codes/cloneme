@@ -18,6 +18,7 @@ from nio import (
     Event,
     MatrixRoom,
     MatrixUser,
+    MegolmEvent,
     MessageDirection,
     ProfileGetAvatarError,
     ProfileGetAvatarResponse,
@@ -100,19 +101,32 @@ class MatrixPlatform(BasePlatform):
         self.matrix_client.add_event_callback(self._on_message, RoomMessageText)
         self.matrix_client.add_response_callback(self._on_sync, SyncResponse)
 
+    async def _on_message(self, room: MatrixRoom, event):
+        """Handle incoming events"""
+        try:
+            if isinstance(event, RoomMessageText):
+                # Handle text messages
+                self.logger.debug(
+                    f"Received message in {room.room_id}: {event.body[:50]}..."
+                )
+                await self._handle_text_messages(room, event)
+            elif isinstance(event, MegolmEvent):
+                self.logger.debug(
+                    f"Received encrypted message in {room.room_id}: {event.parse_decrypted_event}"
+                )
+
+        except Exception as e:
+            self.logger.error(f"Error in Matrix message handler: {e}")
+
     async def _on_sync(self, response: SyncResponse):
         """Called on each sync response from the Matrix server."""
         if not self._running:
             self._running = True
             self.logger.info(f"Matrix client synced and ready as {self.username}")
 
-    async def _on_message(self, room: MatrixRoom, event: RoomMessageText):
-        """Handle incoming Matrix messages."""
+    async def _handle_text_messages(self, room: MatrixRoom, event: RoomMessageText):
+        """Handle text messages"""
         try:
-            self.logger.debug(
-                f"Received message in {room.room_id}: {event.body[:50]}..."
-            )
-
             # Skip our own messages
             if event.sender == self.matrix_client.user_id:
                 return await self._handle_own_message(event, room)
@@ -136,7 +150,7 @@ class MatrixPlatform(BasePlatform):
             self.cleanup_inactive_chats()
             return None
         except Exception as e:
-            self.logger.error(f"Error in Matrix message handler: {e}")
+            self.logger.error(f"Error on handling text messages: {e}")
 
     async def _handle_own_message(self, event: RoomMessageText, room: MatrixRoom):
         """Handle messages sent by the bot itself."""
