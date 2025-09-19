@@ -42,7 +42,7 @@
   },
 
   "participation_control": {
-    "enabled": false,
+    "enabled": true,
     "threshold_percentage": 30,
     "time_window_minutes": 10,
     "group_chat_threshold": 30,
@@ -52,8 +52,8 @@
 
   "debug": {
     "logging": {
-      "detailed_ai_decisions": false,
-      "log_api_calls": false,
+      "detailed_ai_decisions": true,
+      "log_api_calls": true,
       "log_context_formatting": true
     },
     "development": {
