@@ -299,14 +299,14 @@ class MatrixPlatform(BasePlatform):
         if not self.matrix_client.user_id:
             return False
 
-        # Check for actual Matrix User ID mention
-        user_id_pattern = rf"@{re.escape(self.matrix_client.user_id)}"
+        # Check for actual Matrix User ID mention (user_id already includes @)
+        user_id_pattern = rf"{re.escape(self.matrix_client.user_id)}"
         if re.search(user_id_pattern, event.body):
             return True
 
-        if self.profile and self.profile.username:
-            username_pattern = rf"{re.escape(self.profile.username)}:"
-            if re.search(username_pattern, event.body):
+        if self.profile and self.profile.name:
+            name_pattern = rf"{re.escape(self.profile.name)}:"
+            if re.search(name_pattern, event.body):
                 return True
 
         return False
